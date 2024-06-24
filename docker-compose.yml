@@ -13,17 +13,18 @@
 # Using docker-compose it will:
 #
 # - create a network 'guacnetwork_compose' with the 'bridge' driver.
-# - create a service 'guacd_compose' from 'guacamole/guacd' connected to 'guacnetwork'
+# - create a service 'guacd_guacamole_compose' from 'guacamole/guacd' connected to 'guacnetwork'
 # - create a service 'postgres_guacamole_compose' (1) from 'postgres' connected to 'guacnetwork'
 # - create a service 'guacamole_compose' (2)  from 'guacamole/guacamole/' conn. to 'guacnetwork'
 # - create a service 'nginx_guacamole_compose' (3) from 'nginx' connected to 'guacnetwork'
+# - create a service 'netbird_guacamole_compose' (4) from 'netbirdio/netbird' connected to 'guacnetwork'
 #
 # (1)
 #  DB-Init script is in './init/initdb.sql' it has been created executing
 #  'docker run --rm guacamole/guacamole /opt/guacamole/bin/initdb.sh --postgresql > ./init/initdb.sql'
 #  once.
 #  DATA-DIR       is in './data'
-#  If you want to change the DB password change all lines with 'POSTGRES_PASSWORD:' and
+#  If you want to change the DB password change all lines with 'POSTGRESQL_PASSWORD:' and
 #  change it to your needs before first start.
 #  To start from scratch delete './data' dir completely
 #  './data' will hold all data after first start!
@@ -38,7 +39,7 @@
 #  './data' will hold all data after first start!
 #
 # (2)
-#  Make sure you use the same value for 'POSTGRES_USER' and 'POSTGRES_PASSWORD'
+#  Make sure you use the same value for 'POSTGRESQL_USER' and 'POSTGRESQL_PASSWORD'
 #  as configured under (1)
 #
 # (3)
@@ -59,6 +60,10 @@
 #  within the 'guacamole' service. This will expose the guacamole webinterface directly
 #  on port 8080 and you can use it for your own purposes.
 #  Note: Guacamole is available on :8080/guacamole, not /.
+# (4)
+# The netbird container connects to a netbird network using the "NB_SETUP_KEY" from ./.env
+# nginx_guacamole_compose uses netbird's network interface. So incoming connections through netbird
+# reach the web server. 
 #
 # !!!!! FOR INITAL SETUP (after git clone) run ./prepare.sh once
 #
@@ -83,8 +88,6 @@
 # 0.6                2023-03-23        switched to postgres 15.2-alpine
 #####################################################################################
 
-version: '2.0'
-
 # networks
 # create a network 'guacnetwork_compose' in mode 'bridged'
 networks:
@@ -93,9 +96,27 @@ networks:
 
 # services
 services:
+  # netbird
+  netbird:
+    container_name: netbird_guacamole_compose
+    hostname: avocado
+    cap_add:
+        - NET_ADMIN
+        - SYS_ADMIN
+        - SYS_RESOURCE
+    environment:
+        - NB_SETUP_KEY=${NB_SETUP_KEY}
+    image: netbirdio/netbird:latest
+    volumes: 
+    - ./netbird:/etc/netbird 
+    links:
+    - guacamole
+    networks:
+      guacnetwork_compose:
+
   # guacd
   guacd:
-    container_name: guacd_compose
+    container_name: guacd_guacamole_compose
     image: guacamole/guacd
     networks:
       guacnetwork_compose:
@@ -108,9 +129,9 @@ services:
     container_name: postgres_guacamole_compose
     environment:
       PGDATA: /var/lib/postgresql/data/guacamole
-      POSTGRES_DB: guacamole_db
-      POSTGRES_PASSWORD: 'ChooseYourOwnPasswordHere1234'
-      POSTGRES_USER: guacamole_user
+      POSTGRESQL_DB: guacamole_db
+      POSTGRESQL_PASSWORD: ${POSTGRESQL_PASSWORD}
+      POSTGRESQL_USER: guacamole_user
     image: postgres:15.2-alpine
     networks:
       guacnetwork_compose:
@@ -127,10 +148,10 @@ services:
     - postgres
     environment:
       GUACD_HOSTNAME: guacd
-      POSTGRES_DATABASE: guacamole_db
-      POSTGRES_HOSTNAME: postgres
-      POSTGRES_PASSWORD: 'ChooseYourOwnPasswordHere1234'
-      POSTGRES_USER: guacamole_user
+      POSTGRESQL_DATABASE: guacamole_db
+      POSTGRESQL_HOSTNAME: postgres
+      POSTGRESQL_PASSWORD: ${POSTGRESQL_PASSWORD}
+      POSTGRESQL_USER: guacamole_user
     image: guacamole/guacamole
     links:
     - guacd
@@ -153,10 +174,5 @@ services:
    - ./nginx/templates:/etc/nginx/templates:ro
    - ./nginx/ssl/self.cert:/etc/nginx/ssl/self.cert:ro
    - ./nginx/ssl/self-ssl.key:/etc/nginx/ssl/self-ssl.key:ro
-   ports:
-   - 8443:443
-   links:
-   - guacamole
-   networks:
-     guacnetwork_compose:
+   network_mode: service:netbird
 ####################################################################################
